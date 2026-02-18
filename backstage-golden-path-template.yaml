@@ -1,0 +1,213 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: aws-infrastructure-golden-path
+  title: AWS Infrastructure Golden Path
+  description: Provision AWS infrastructure using Terraform Enterprise and deploy applications with GitLab CI
+  tags:
+    - aws
+    - terraform
+    - gitlab-ci
+    - infrastructure
+spec:
+  owner: platform-team
+  type: service
+  
+  parameters:
+    - title: Project Information
+      required:
+        - project_name
+        - owner
+        - environment
+      properties:
+        project_name:
+          title: Project Name
+          type: string
+          description: Name of your project (lowercase, no spaces)
+          pattern: '^[a-z0-9-]+$'
+          ui:autofocus: true
+        
+        owner:
+          title: Owner
+          type: string
+          description: Owner of the project
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: [Group, User]
+        
+        environment:
+          title: Environment
+          type: string
+          description: Deployment environment
+          enum:
+            - dev
+            - staging
+            - production
+          default: dev
+        
+        description:
+          title: Description
+          type: string
+          description: Project description
+    
+    - title: Infrastructure Configuration
+      required:
+        - aws_region
+        - instance_type
+      properties:
+        aws_region:
+          title: AWS Region
+          type: string
+          description: AWS region for deployment
+          enum:
+            - us-east-1
+            - us-west-2
+            - eu-west-1
+            - ap-southeast-1
+          default: us-east-1
+        
+        instance_type:
+          title: EC2 Instance Type
+          type: string
+          description: EC2 instance type
+          enum:
+            - t3.micro
+            - t3.small
+            - t3.medium
+            - t3.large
+          default: t3.small
+        
+        vpc_cidr:
+          title: VPC CIDR Block
+          type: string
+          description: CIDR block for VPC
+          default: "10.0.0.0/16"
+        
+        enable_kubernetes:
+          title: Enable Kubernetes (EKS)
+          type: boolean
+          description: Deploy EKS cluster
+          default: false
+    
+    - title: Application Configuration
+      properties:
+        application_port:
+          title: Application Port
+          type: number
+          description: Port your application listens on
+          default: 8080
+        
+        health_check_path:
+          title: Health Check Path
+          type: string
+          description: Health check endpoint
+          default: /health
+        
+        docker_image:
+          title: Docker Image (optional)
+          type: string
+          description: Docker image to deploy (leave empty for custom build)
+    
+    - title: GitLab Repository
+      required:
+        - gitlab_group
+      properties:
+        gitlab_group:
+          title: GitLab Group
+          type: string
+          description: GitLab group/namespace for the repository
+          default: infrastructure
+        
+        repo_visibility:
+          title: Repository Visibility
+          type: string
+          enum:
+            - private
+            - internal
+            - public
+          default: private
+
+  steps:
+    # Step 1: Fetch base template
+    - id: fetch-base
+      name: Fetch Base Template
+      action: fetch:template
+      input:
+        url: ./content
+        values:
+          project_name: ${{ parameters.project_name }}
+          owner: ${{ parameters.owner }}
+          environment: ${{ parameters.environment }}
+          description: ${{ parameters.description }}
+          aws_region: ${{ parameters.aws_region }}
+          instance_type: ${{ parameters.instance_type }}
+          vpc_cidr: ${{ parameters.vpc_cidr }}
+          enable_kubernetes: ${{ parameters.enable_kubernetes }}
+          application_port: ${{ parameters.application_port }}
+          health_check_path: ${{ parameters.health_check_path }}
+          docker_image: ${{ parameters.docker_image }}
+    
+    # Step 2: Create GitLab repository
+    - id: publish-gitlab
+      name: Publish to GitLab
+      action: publish:gitlab
+      input:
+        repoUrl: gitlab.com?owner=${{ parameters.gitlab_group }}&repo=${{ parameters.project_name }}
+        description: ${{ parameters.description }}
+        defaultBranch: main
+        repoVisibility: ${{ parameters.repo_visibility }}
+    
+    # Step 3: Register component in Backstage catalog
+    - id: register-catalog
+      name: Register Component in Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish-gitlab'].output.repoContentsUrl }}
+        catalogInfoPath: '/catalog-info.yaml'
+    
+    # Step 4: Create GitLab CI variables
+    - id: create-gitlab-variables
+      name: Create GitLab CI Variables
+      action: gitlab:variables:create
+      input:
+        repoUrl: gitlab.com?owner=${{ parameters.gitlab_group }}&repo=${{ parameters.project_name }}
+        variables:
+          - key: AWS_REGION
+            value: ${{ parameters.aws_region }}
+            protected: true
+            masked: false
+          - key: ENVIRONMENT
+            value: ${{ parameters.environment }}
+            protected: true
+            masked: false
+          - key: TFE_TOKEN
+            value: ${{ secrets.TFE_TOKEN }}
+            protected: true
+            masked: true
+          - key: TFE_ORGANIZATION
+            value: ${{ secrets.TFE_ORGANIZATION }}
+            protected: true
+            masked: false
+
+  output:
+    links:
+      - title: GitLab Repository
+        url: ${{ steps['publish-gitlab'].output.remoteUrl }}
+      - title: GitLab CI Pipeline
+        url: ${{ steps['publish-gitlab'].output.remoteUrl }}/-/pipelines
+      - title: Open in Catalog
+        icon: catalog
+        entityRef: ${{ steps['register-catalog'].output.entityRef }}
+    
+    text:
+      - title: Next Steps
+        content: |
+          Your infrastructure project has been created!
+          
+          1. GitLab CI pipeline will start automatically
+          2. Stage 1: Terraform Enterprise will provision infrastructure
+          3. Stage 2: Applications will be deployed to the new infrastructure
+          4. Monitor pipeline status in GitLab or Backstage
+          
+          Repository: ${{ steps['publish-gitlab'].output.remoteUrl }}

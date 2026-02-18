@@ -1,0 +1,27 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: ${{ values.project_name }}
+  description: ${{ values.description }}
+  annotations:
+    gitlab.com/project-slug: ${{ values.gitlab_group }}/${{ values.project_name }}
+    backstage.io/techdocs-ref: dir:.
+    aws.amazon.com/region: ${{ values.aws_region }}
+  tags:
+    - aws
+    - terraform
+    - ${{ values.environment }}
+  links:
+    - url: https://gitlab.com/${{ values.gitlab_group }}/${{ values.project_name }}/-/pipelines
+      title: GitLab CI Pipelines
+      icon: dashboard
+    - url: https://console.aws.amazon.com/ec2/v2/home?region=${{ values.aws_region }}
+      title: AWS Console
+      icon: cloud
+spec:
+  type: service
+  lifecycle: ${{ values.environment }}
+  owner: ${{ values.owner }}
+  system: infrastructure
+  providesApis: []
+  consumesApis: []

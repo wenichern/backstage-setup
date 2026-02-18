@@ -1,0 +1,314 @@
+variables:
+  TF_ROOT: ${CI_PROJECT_DIR}/terraform
+  TF_STATE_NAME: ${ENVIRONMENT}-${CI_PROJECT_NAME}
+
+stages:
+  - validate
+  - plan
+  - provision
+  - deploy
+  - verify
+
+# Default retry configuration
+default:
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+
+# Stage 1: Terraform Enterprise - Provision Infrastructure
+terraform-validate:
+  stage: validate
+  image: hashicorp/terraform:latest
+  before_script:
+    - cd ${TF_ROOT}
+    - |
+      cat > backend.tf <<EOF
+      terraform {
+        cloud {
+          organization = "${TFE_ORGANIZATION}"
+          workspaces {
+            name = "${TF_STATE_NAME}"
+          }
+        }
+      }
+      EOF
+    - terraform init -input=false
+  script:
+    - terraform fmt -check
+    - terraform validate
+  only:
+    - branches
+  tags:
+    - docker
+
+terraform-plan:
+  stage: plan
+  image: hashicorp/terraform:latest
+  before_script:
+    - cd ${TF_ROOT}
+    - |
+      cat > backend.tf <<EOF
+      terraform {
+        cloud {
+          organization = "${TFE_ORGANIZATION}"
+          workspaces {
+            name = "${TF_STATE_NAME}"
+          }
+        }
+      }
+      EOF
+    - terraform init -input=false
+  script:
+    - terraform plan -out=tfplan -input=false
+    - terraform show -json tfplan > plan.json
+  artifacts:
+    paths:
+      - ${TF_ROOT}/tfplan
+      - ${TF_ROOT}/plan.json
+    expire_in: 1 day
+  only:
+    - branches
+  tags:
+    - docker
+
+terraform-apply:
+  stage: provision
+  image: hashicorp/terraform:latest
+  before_script:
+    - cd ${TF_ROOT}
+    - |
+      cat > backend.tf <<EOF
+      terraform {
+        cloud {
+          organization = "${TFE_ORGANIZATION}"
+          workspaces {
+            name = "${TF_STATE_NAME}"
+          }
+        }
+      }
+      EOF
+    - terraform init -input=false
+  script:
+    - terraform apply -input=false tfplan
+    - terraform output -json > outputs.json
+  artifacts:
+    paths:
+      - ${TF_ROOT}/outputs.json
+    expire_in: 7 days
+  dependencies:
+    - terraform-plan
+  only:
+    - main
+    - master
+  when: manual
+  tags:
+    - docker
+
+# Stage 2: Deploy Application to New Infrastructure
+deploy-to-ec2:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache openssh-client curl jq
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan -H $(jq -r '.instance_public_ip.value' ${TF_ROOT}/outputs.json) >> ~/.ssh/known_hosts
+  script:
+    - |
+      INSTANCE_IP=$(jq -r '.instance_public_ip.value' ${TF_ROOT}/outputs.json)
+      echo "Deploying to instance: $INSTANCE_IP"
+      
+      # Copy deployment scripts to instance
+      scp -r ${CI_PROJECT_DIR}/scripts/* ec2-user@${INSTANCE_IP}:/tmp/
+      
+      # Execute deployment scripts via SSH
+      ssh ec2-user@${INSTANCE_IP} << 'ENDSSH'
+        set -e
+        
+        # Run installation scripts
+        chmod +x /tmp/*.sh
+        
+        echo "Installing Docker..."
+        sudo bash /tmp/install-docker.sh
+        
+        echo "Installing kubectl..."
+        sudo bash /tmp/install-kubectl.sh
+        
+        echo "Installing Helm..."
+        sudo bash /tmp/install-helm.sh
+        
+        echo "Starting application..."
+        sudo bash /tmp/deploy-app.sh
+      ENDSSH
+      
+      echo "Deployment completed successfully!"
+  dependencies:
+    - terraform-apply
+  only:
+    - main
+    - master
+  tags:
+    - docker
+
+deploy-to-kubernetes:
+  stage: deploy
+  image: alpine/k8s:latest
+  before_script:
+    - apk add --no-cache curl jq
+    # Configure kubectl
+    - mkdir -p ~/.kube
+    - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config
+  script:
+    - |
+      EKS_CLUSTER_ENDPOINT=$(jq -r '.eks_cluster_endpoint.value' ${TF_ROOT}/outputs.json)
+      
+      if [ "$EKS_CLUSTER_ENDPOINT" != "null" ]; then
+        echo "Deploying to EKS cluster..."
+        
+        # Update kubeconfig for EKS
+        aws eks update-kubeconfig --name $(jq -r '.eks_cluster_name.value' ${TF_ROOT}/outputs.json) --region ${AWS_REGION}
+        
+        # Apply Kubernetes manifests
+        kubectl apply -f ${CI_PROJECT_DIR}/k8s/
+        
+        # Wait for deployment to be ready
+        kubectl rollout status deployment/$(jq -r '.project_name' ${TF_ROOT}/outputs.json) -n default
+        
+        echo "Kubernetes deployment completed!"
+      else
+        echo "EKS cluster not provisioned, skipping..."
+      fi
+  dependencies:
+    - terraform-apply
+  only:
+    - main
+    - master
+  when: on_success
+  tags:
+    - docker
+
+deploy-with-helm:
+  stage: deploy
+  image: alpine/helm:latest
+  before_script:
+    - apk add --no-cache curl jq
+    - mkdir -p ~/.kube
+    - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config
+  script:
+    - |
+      EKS_CLUSTER_ENDPOINT=$(jq -r '.eks_cluster_endpoint.value' ${TF_ROOT}/outputs.json)
+      
+      if [ "$EKS_CLUSTER_ENDPOINT" != "null" ]; then
+        echo "Deploying with Helm..."
+        
+        # Update kubeconfig
+        aws eks update-kubeconfig --name $(jq -r '.eks_cluster_name.value' ${TF_ROOT}/outputs.json) --region ${AWS_REGION}
+        
+        # Install or upgrade Helm release
+        helm upgrade --install ${CI_PROJECT_NAME} ${CI_PROJECT_DIR}/helm/ \
+          --namespace default \
+          --create-namespace \
+          --set image.tag=${CI_COMMIT_SHORT_SHA} \
+          --set environment=${ENVIRONMENT} \
+          --wait
+        
+        echo "Helm deployment completed!"
+      else
+        echo "EKS cluster not provisioned, skipping..."
+      fi
+  dependencies:
+    - terraform-apply
+  only:
+    - main
+    - master
+  when: manual
+  tags:
+    - docker
+
+# Stage 3: Verify Deployment
+verify-ec2-health:
+  stage: verify
+  image: curlimages/curl:latest
+  script:
+    - |
+      INSTANCE_IP=$(jq -r '.instance_public_ip.value' ${TF_ROOT}/outputs.json)
+      HEALTH_URL="http://${INSTANCE_IP}:${APPLICATION_PORT}${HEALTH_CHECK_PATH}"
+      
+      echo "Checking health endpoint: $HEALTH_URL"
+      
+      for i in {1..10}; do
+        if curl -f -s -o /dev/null -w "%{http_code}" $HEALTH_URL | grep -q "200"; then
+          echo "Health check passed!"
+          exit 0
+        fi
+        echo "Attempt $i failed, retrying in 10s..."
+        sleep 10
+      done
+      
+      echo "Health check failed after 10 attempts"
+      exit 1
+  dependencies:
+    - terraform-apply
+    - deploy-to-ec2
+  only:
+    - main
+    - master
+  tags:
+    - docker
+
+verify-kubernetes-health:
+  stage: verify
+  image: alpine/k8s:latest
+  before_script:
+    - apk add --no-cache curl jq
+    - mkdir -p ~/.kube
+    - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config
+  script:
+    - |
+      EKS_CLUSTER_ENDPOINT=$(jq -r '.eks_cluster_endpoint.value' ${TF_ROOT}/outputs.json)
+      
+      if [ "$EKS_CLUSTER_ENDPOINT" != "null" ]; then
+        echo "Verifying Kubernetes deployment..."
+        
+        # Update kubeconfig
+        aws eks update-kubeconfig --name $(jq -r '.eks_cluster_name.value' ${TF_ROOT}/outputs.json) --region ${AWS_REGION}
+        
+        # Check pod status
+        kubectl get pods -n default
+        
+        # Check service endpoints
+        kubectl get svc -n default
+        
+        echo "Kubernetes verification completed!"
+      else
+        echo "EKS cluster not provisioned, skipping..."
+      fi
+  dependencies:
+    - terraform-apply
+    - deploy-to-kubernetes
+  only:
+    - main
+    - master
+  allow_failure: true
+  tags:
+    - docker
+
+# Cleanup on failure
+cleanup-on-failure:
+  stage: .post
+  image: hashicorp/terraform:latest
+  script:
+    - cd ${TF_ROOT}
+    - terraform init -input=false
+    - terraform destroy -auto-approve -input=false
+  when: on_failure
+  only:
+    - main
+    - master
+  allow_failure: true
+  tags:
+    - docker
