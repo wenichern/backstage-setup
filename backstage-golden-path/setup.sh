@@ -50,7 +50,7 @@ fi
 # Step 3: Copy template files
 echo ""
 echo "Step 3: Copying template files..."
-TEMPLATE_SOURCE="/Users/smarticle/awsaidevelopertraining/backstage-setup/backstage-golden-path"
+TEMPLATE_SOURCE="/Users/smarticle/backstage-setup/backstage-golden-path"
 
 if [ ! -d "$TEMPLATE_SOURCE" ]; then
     echo "❌ Error: Template source not found at $TEMPLATE_SOURCE"

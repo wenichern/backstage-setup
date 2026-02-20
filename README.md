@@ -38,7 +38,7 @@ backstage-setup/
 Run the automated setup script:
 
 ```bash
-cd /Users/smarticle/awsaidevelopertraining/backstage-setup/backstage-golden-path
+cd /Users/smarticle/backstage-setup/backstage-golden-path
 ./setup.sh
 ```
 
@@ -120,7 +120,7 @@ View in Backstage catalog
 
 ```bash
 # Navigate to the template directory
-cd /Users/smarticle/awsaidevelopertraining/backstage-setup/backstage-golden-path
+cd /Users/smarticle/backstage-setup/backstage-golden-path
 
 # Run setup script
 ./setup.sh

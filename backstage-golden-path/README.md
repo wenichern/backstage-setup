@@ -7,7 +7,7 @@ Complete template for provisioning AWS infrastructure using Backstage, GitLab CI
 Your template is ready to use! Run this single command:
 
 ```bash
-cd /Users/smarticle/awsaidevelopertraining/backstage-golden-path
+cd /Users/smarticle/backstage-setup/backstage-golden-path
 ./setup.sh
 ```
 
@@ -71,7 +71,7 @@ If the script doesn't work or you prefer manual setup:
 2. **Copy template files**
    ```bash
    mkdir -p templates/aws-infrastructure-golden-path
-   cp -r /Users/smarticle/awsaidevelopertraining/backstage-golden-path/* \
+   cp -r /Users/smarticle/backstage-setup/backstage-golden-path/* \
          templates/aws-infrastructure-golden-path/
    ```
 

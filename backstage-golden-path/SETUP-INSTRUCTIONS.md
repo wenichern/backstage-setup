@@ -4,7 +4,7 @@
 
 All files are organized in:
 ```
-/Users/smarticle/awsaidevelopertraining/backstage-golden-path/
+/Users/smarticle/backstage-setup/backstage-golden-path/
 ├── template.yaml
 └── content/
     ├── .gitlab-ci.yml
@@ -50,7 +50,7 @@ BACKSTAGE_PATH="/Users/smarticle/backstage"
 mkdir -p $BACKSTAGE_PATH/templates/aws-infrastructure-golden-path
 
 # Copy all files
-cp -r /Users/smarticle/awsaidevelopertraining/backstage-golden-path/* \
+cp -r /Users/smarticle/backstage-setup/backstage-golden-path/* \
       $BACKSTAGE_PATH/templates/aws-infrastructure-golden-path/
 
 # Verify
@@ -166,7 +166,7 @@ mkdir -p $BACKSTAGE_PATH/templates/aws-infrastructure-golden-path
 
 # Copy files
 echo "Copying template files..."
-cp -r /Users/smarticle/awsaidevelopertraining/backstage-golden-path/* \
+cp -r /Users/smarticle/backstage-setup/backstage-golden-path/* \
       $BACKSTAGE_PATH/templates/aws-infrastructure-golden-path/
 
 # Verify
