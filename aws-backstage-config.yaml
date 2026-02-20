@@ -1,0 +1,110 @@
+# AWS Integration Configuration for Backstage
+# Add this to your app-config.yaml
+
+# ============================================
+# AWS Resource Discovery Configuration
+# ============================================
+aws:
+  # AWS Account information
+  accounts:
+    - accountId: 'YOUR_AWS_ACCOUNT_ID'
+      name: 'Production'
+      region: 'us-east-1'
+      # Authentication method 1: IAM credentials
+      accessKeyId: ${AWS_ACCESS_KEY_ID}
+      secretAccessKey: ${AWS_SECRET_ACCESS_KEY}
+      
+      # Authentication method 2: IAM Role (recommended for production)
+      # roleArn: 'arn:aws:iam::123456789012:role/BackstageRole'
+      
+    - accountId: 'YOUR_DEV_AWS_ACCOUNT_ID'
+      name: 'Development'
+      region: 'us-east-1'
+      accessKeyId: ${AWS_ACCESS_KEY_ID}
+      secretAccessKey: ${AWS_SECRET_ACCESS_KEY}
+
+# ============================================
+# AWS Lambda Plugin Configuration
+# ============================================
+awsLambda:
+  # Refresh interval for Lambda functions
+  refreshInterval: 300 # seconds
+
+# ============================================
+# AWS Cost Insights Configuration
+# ============================================
+costInsights:
+  engineerCost: 200000 # Annual engineer cost in cents
+  products:
+    computeEngine:
+      name: AWS Compute Engine
+      icon: compute
+    cloudDataflow:
+      name: AWS Services
+      icon: data
+    cloudStorage:
+      name: AWS S3
+      icon: storage
+    bigQuery:
+      name: AWS RDS
+      icon: search
+  metrics:
+    - kind: COST_INSIGHTS
+      duration: P30D # Last 30 days
+
+# ============================================
+# Catalog Configuration - AWS Resources
+# ============================================
+catalog:
+  locations:
+    # Your existing template
+    - type: file
+      target: ./templates/aws-infrastructure-golden-path/template.yaml
+      rules:
+        - allow: [Template]
+    
+    # Discover AWS resources automatically
+    - type: url
+      target: https://github.com/your-org/aws-resources/blob/main/catalog-info.yaml
+      rules:
+        - allow: [Component, Resource]
+
+  # Entity providers for AWS resource discovery
+  providers:
+    awsS3:
+      default:
+        bucketName: 'your-backstage-resources-bucket'
+        region: 'us-east-1'
+        schedule:
+          frequency: { hours: 1 }
+          timeout: { minutes: 3 }
+
+# ============================================
+# Terraform Cloud/Enterprise Configuration
+# ============================================
+scaffolder:
+  # Default author info for git commits
+  defaultAuthor:
+    name: Backstage Scaffolder
+    email: scaffolder@example.com
+  
+  # Default commit message
+  defaultCommitMessage: 'Initial commit from Backstage'
+
+# Add secrets (use environment variables)
+secrets:
+  TFE_TOKEN: ${TFE_TOKEN}
+  TFE_ORGANIZATION: ${TFE_ORGANIZATION}
+  GITLAB_TOKEN: ${GITLAB_TOKEN}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+
+# ============================================
+# Proxy Configuration for AWS APIs
+# ============================================
+proxy:
+  '/aws-sdk':
+    target: https://sts.amazonaws.com
+    changeOrigin: true
+    headers:
+      Authorization: 'AWS4-HMAC-SHA256 Credential=${AWS_ACCESS_KEY_ID}'
