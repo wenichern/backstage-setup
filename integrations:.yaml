@@ -1,0 +1,4 @@
+integrations:
+  gitlab:
+    - host: gitlab.com
+      token: glpat-your-actual-token-here
